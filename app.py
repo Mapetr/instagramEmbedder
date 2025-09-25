@@ -12,7 +12,7 @@ app = Flask(__name__)
 OUTPUT_FOLDER = os.path.join(os.getcwd(), "static")
 os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 
-db = PickleDB("cache.db")
+db = PickleDB("data/cache.db")
 
 
 @app.route("/p/<id>")
@@ -32,7 +32,7 @@ def index(id):
         return redirect(url, code=302)
 
     ydl_opts = {
-        "cookiefile": "cookies.txt",
+        "cookiefile": "data/cookies.txt",
         "format": "best",
         "outtmpl": os.path.join(OUTPUT_FOLDER, "%(id)s.%(ext)s"),
         "postprocessors": [
@@ -107,6 +107,3 @@ def index(id):
 
     return finished_html
 
-
-if __name__ == "__main__":
-    app.run(debug=True)

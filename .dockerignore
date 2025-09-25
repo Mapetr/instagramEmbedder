@@ -1,0 +1,5 @@
+.venv/
+static/
+.gitignore
+cache.db
+compose.yml

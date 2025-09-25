@@ -1,0 +1,10 @@
+services:
+  instaembedder:
+    build:
+      context: ./
+      dockerfile: Dockerfile
+    ports:
+      - "127.0.0.1:3000:3000"
+    volumes:
+      - ./data:/usr/src/app/data
+      - ./static:/usr/src/app/static
