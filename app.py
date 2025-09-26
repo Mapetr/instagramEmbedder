@@ -162,11 +162,15 @@ def extract_metadata(url: str) -> dict:
     return meta
 
 
-@app.route("/p/<id>")
-@app.route("/p/<id>/")
-@app.route("/reel/<id>")
-@app.route("/reel/<id>/")
-def index(id):
+@app.route("/p/<id>", defaults={"username": ""})
+@app.route("/p/<id>/", defaults={"username": ""})
+@app.route("/reel/<id>", defaults={"username": ""})
+@app.route("/reel/<id>/", defaults={"username": ""})
+@app.route("/<username>/p/<id>")
+@app.route("/<username>/p/<id>/")
+@app.route("/<username>/reel/<id>")
+@app.route("/<username>/reel/<id>/")
+def index(username, id):
     use_cache = not app.debug
     if use_cache:
         cache = db.get(id)
