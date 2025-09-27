@@ -1,16 +1,13 @@
-import json
 import os
 import subprocess
 import mimetypes
 from glob import glob
-from datetime import datetime, timezone
 
 import crawleruseragents
 import gallery_dl
 from pickledb import PickleDB
 from flask import Flask, url_for, render_template_string, request, redirect
 from PIL import Image
-from yt_dlp import YoutubeDL
 
 # Ensure AVIF mimetype is known
 mimetypes.add_type("image/avif", ".avif")
