@@ -136,9 +136,7 @@ def convert_images_to_avif(post_id: str, quality: int = 60, speed: int = 6) -> N
 
 def extract_metadata(url: str) -> dict:
     meta = {
-        "title": "Instagram Media",
         "description": "",
-        "thumbnail": "",
         "like_count": None,
         "comment_count": None,
         "uploader": "",
@@ -163,9 +161,7 @@ def extract_metadata(url: str) -> dict:
 
         if isinstance(info, dict):
             dlog(f"[gallery-dl] Metadata keys: {list(info.keys())}")
-            meta["title"] = info.get("title") or meta["title"]
             meta["description"] = info.get("description") or info.get("content") or ""
-            meta["thumbnail"] = info.get("thumbnail") or info.get("thumbnail_url") or info.get("image") or meta["thumbnail"]
             meta["like_count"] = info.get("likes") or info.get("like_count")
             meta["comment_count"] = info.get("comments") or info.get("comment_count")
             meta["uploader"] = info.get("username") or info.get("author") or ""
@@ -280,10 +276,10 @@ def index(username, id):
     """
 
     # Build title/description with likes/comments appended per requirements
-    base_title = meta.get("title") or "Instagram Media"
     base_desc = meta.get("description") or ""
     like_count = meta.get("like_count")
     comment_count = meta.get("comment_count")
+    uploader = meta.get("uploader")
 
     def _fmt(n):
         try:
@@ -296,22 +292,11 @@ def index(username, id):
         parts.append(f"{_fmt(like_count)} Likes")
     if isinstance(comment_count, (int, float)):
         parts.append(f"{_fmt(comment_count)} Comments")
-    counts_text = " · ".join(parts)
-
-    display_title = base_title
-    display_description = base_desc
-    if counts_text:
-        if base_desc:
-            display_description = f"{base_desc} · {counts_text}"
-            dlog(f"Appended counts to description: {counts_text}")
-        else:
-            display_title = f"{base_title} · {counts_text}"
-            dlog(f"Appended counts to title: {counts_text}")
 
     finished_html = render_template_string(
         html_template,
-        title=display_title,
-        description=display_description,
+        title=f"{uploader} · {like_count} Likes",
+        description=base_desc,
         og_type=og_type,
         twitter_card=twitter_card,
         primary_url=primary_url,
