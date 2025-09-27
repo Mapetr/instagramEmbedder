@@ -3,11 +3,14 @@ import os
 import subprocess
 import mimetypes
 from glob import glob
+from datetime import datetime, timezone
 
 import crawleruseragents
+import gallery_dl
 from pickledb import PickleDB
 from flask import Flask, url_for, render_template_string, request, redirect
 from PIL import Image
+from yt_dlp import YoutubeDL
 
 # Ensure AVIF mimetype is known
 mimetypes.add_type("image/avif", ".avif")
@@ -135,30 +138,47 @@ def convert_images_to_avif(post_id: str, quality: int = 60, speed: int = 6) -> N
 
 
 def extract_metadata(url: str) -> dict:
-    """Try to get metadata via gallery-dl -j. Returns dict with title, description, thumbnail."""
-    meta = {"title": "Instagram Media", "description": "", "thumbnail": ""}
+    meta = {
+        "title": "Instagram Media",
+        "description": "",
+        "thumbnail": "",
+        "like_count": None,
+        "comment_count": None,
+        "uploader": "",
+        "timestamp": None,
+        "webpage_url": url,
+    }
+
     try:
-        dlog(f"Extracting metadata for: {url}")
-        proc = subprocess.run(["gallery-dl", "-j", url], check=False, capture_output=True, text=True)
-        if DEBUG and proc.stderr:
-            dlog(f"gallery-dl -j stderr:\n{proc.stderr}")
-        if proc.returncode not in (0, 4):
-            dlog(f"gallery-dl -j returned code {proc.returncode}")
-            return meta
-        lines = [json.loads(l) for l in proc.stdout.splitlines() if l.strip()]
-        if DEBUG:
-            dlog(f"gallery-dl -j produced {len(lines)} JSON lines")
-        if not lines:
-            return meta
-        first = lines[0]
-        # Common fields
-        meta["title"] = first.get("title") or first.get("owner") or meta["title"]
-        meta["description"] = first.get("description") or first.get("caption") or ""
-        thumb = first.get("thumbnail") or first.get("preview") or first.get("url")
-        if thumb:
-            meta["thumbnail"] = thumb
+        dlog(f"[gallery-dl] Extracting metadata for: {url}")
+        gallery_dl.config.set((), "cookies", COOKIES_FILE)
+        gallery_dl.config.set(("extractor", "instagram"), "cookies", COOKIES_FILE)
+
+        job = gallery_dl.job.DataJob(url, file=None)
+        job.run()
+
+        info = None
+        try:
+            if getattr(job, "data_post", None):
+                info = job.data_post[0] if job.data_post else None
+        except Exception:
+            info = None
+
+        if isinstance(info, dict):
+            dlog(f"[gallery-dl] Metadata keys: {list(info.keys())}")
+            meta["title"] = info.get("title") or meta["title"]
+            meta["description"] = info.get("description") or info.get("content") or ""
+            meta["thumbnail"] = info.get("thumbnail") or info.get("thumbnail_url") or info.get("image") or meta["thumbnail"]
+            meta["like_count"] = info.get("likes") or info.get("like_count")
+            meta["comment_count"] = info.get("comments") or info.get("comment_count")
+            meta["uploader"] = info.get("username") or info.get("author") or ""
+            meta["timestamp"] = info.get("timestamp")
+        else:
+            dlog("[gallery-dl] No dictionary metadata extracted from DataJob")
+
     except Exception as e:
-        dlog(f"Metadata extraction error: {e}")
+        dlog(f"Metadata extraction error (gallery-dl): {e}")
+
     return meta
 
 
@@ -188,9 +208,7 @@ def index(username, id):
     dlog(f"Resolved Instagram URL: {url}")
 
     user_agent = request.headers.get("User-Agent")
-    dlog(f"User-Agent: {user_agent}")
     if not crawleruseragents.is_crawler(user_agent):
-        dlog("Non-crawler detected; redirecting to Instagram")
         return redirect(url, code=302)
 
     # Fetch metadata (best-effort) and download media (supports images and carousels)
@@ -200,6 +218,7 @@ def index(username, id):
     except subprocess.CalledProcessError as e:
         # If download fails, still try to render something with original URL
         dlog(f"gallery-dl failed: {e}")
+
 
     # Convert images to AVIF to conserve space/bandwidth
     try:
@@ -224,10 +243,6 @@ def index(username, id):
     og_type = "video.other" if primary_is_video else "article"
     twitter_card = "player" if primary_is_video else "summary_large_image"
 
-    # Thumbnail: prefer metadata, else first image file, else primary
-    thumbnail = meta.get("thumbnail") or next((u for f, u in zip(files, media_urls) if not is_video(f)), primary_url)
-    dlog(f"Thumbnail selected: {thumbnail}")
-
     # Render with Open Graph meta tags only (no inline media display)
     html_template = """
     <!DOCTYPE html>
@@ -242,6 +257,7 @@ def index(username, id):
         <meta property="og:description" content="{{ description }}">
         <meta property="og:type" content="{{ og_type }}">
         <meta property="og:url" content="{{ primary_url }}">
+        <meta property="og:site_name" content="Instagram">
         {% for img in images %}
         <meta property="og:image" content="{{ img }}">
         {% endfor %}
@@ -266,16 +282,46 @@ def index(username, id):
     </html>
     """
 
+    # Build title/description with likes/comments appended per requirements
+    base_title = meta.get("title") or "Instagram Media"
+    base_desc = meta.get("description") or ""
+    like_count = meta.get("like_count")
+    comment_count = meta.get("comment_count")
+
+    def _fmt(n):
+        try:
+            return f"{int(n):,}"
+        except Exception:
+            return str(n)
+
+    parts = []
+    if isinstance(like_count, (int, float)):
+        parts.append(f"{_fmt(like_count)} Likes")
+    if isinstance(comment_count, (int, float)):
+        parts.append(f"{_fmt(comment_count)} Comments")
+    counts_text = " · ".join(parts)
+
+    display_title = base_title
+    display_description = base_desc
+    if counts_text:
+        if base_desc:
+            display_description = f"{base_desc} · {counts_text}"
+            dlog(f"Appended counts to description: {counts_text}")
+        else:
+            display_title = f"{base_title} · {counts_text}"
+            dlog(f"Appended counts to title: {counts_text}")
+
     finished_html = render_template_string(
         html_template,
-        title=meta.get("title") or "Instagram Media",
-        description=meta.get("description") or "",
+        title=display_title,
+        description=display_description,
         og_type=og_type,
         twitter_card=twitter_card,
         primary_url=primary_url,
         primary_is_video=primary_is_video,
-        thumbnail=thumbnail,
         images=[u for f, u in zip(files, media_urls) if not is_video(f)],
+        like_count=meta.get("like_count"),
+        comment_count=meta.get("comment_count"),
     )
 
     if use_cache:
